@@ -34,6 +34,11 @@ public:
     float getRotVecHeading()     const { return rotVecHeadingDeg_; }
     float getRotVecAccuracyDeg() const { return rotVecAccuracyDeg_; }
 
+    // Running average of RotVec heading — only samples with accuracy <= 10° are included.
+    // Uses circular mean (sin/cos) to handle 0/360 wrap correctly.
+    // Returns -1.0 if no valid samples accumulated yet.
+    float getRotVecHeadingAvg() const { return rotVecHeadingAvg_; }
+
 private:
     Adafruit_BNO08x   bno;
     sh2_SensorValue_t sensorValue;
@@ -49,6 +54,16 @@ private:
     // Will be used at arm time once validated as trustworthy.
     float rotVecHeadingDeg_  = -1.0f;   // -1 = no sample received yet
     float rotVecAccuracyDeg_ = 999.0f;  // large value = unknown / untrustworthy
+
+    // Circular mean average of RotVec heading — accuracy-gated (<=10 deg only)
+    static constexpr uint8_t RV_AVG_N = 10;
+    float    rvSinBuf_[RV_AVG_N] = {};
+    float    rvCosBuf_[RV_AVG_N] = {};
+    float    rvSinSum_ = 0.0f;
+    float    rvCosSum_ = 0.0f;
+    uint8_t  rvAvgIdx_ = 0;
+    uint8_t  rvAvgFill_ = 0;
+    float    rotVecHeadingAvg_ = -1.0f;
 
     // Wrap helpers
     static float wrap360(float deg);

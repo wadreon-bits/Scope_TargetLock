@@ -150,7 +150,7 @@
 
 // --- System State ---
 bool     flag_100ms    = false;
-int      bleEnabled    = false;
+int      bleEnabled    = true;
 int      currentCommand = 0;       // Last received motor command
 
 // Sensor availability — set once at boot, never change.
@@ -257,7 +257,8 @@ static const char* gpsHealthToStr(GPSManager::HealthState s) {
 //   5:boatHead_deg  6:rotHead_deg  7:TL_on
 //   8:distToTarget_m  9:HL_target_deg  10:motorCmd
 //   11:geoMagStatus(0-3)  12:rotVecHeading_deg  13:rotVecAccuracy_deg
-// Fields 11-13 are for compass testing — compare 12 to a real compass,
+//   14:rotVecHeadingAvg_deg  (accuracy-gated 10-sample circular mean)
+// Fields 11-14 are for compass testing — compare 12/14 to a real compass,
 // trust the reading only when 13 is below 10.0 degrees.
 static void printStatusLine(uint32_t now_ms) {
   bool tl_on = targetLock.active();
@@ -275,13 +276,14 @@ static void printStatusLine(uint32_t now_ms) {
   uint8_t geoMagSt    = mag.getGeoMagStatus();
   float rotVecHead    = mag.getRotVecHeading();
   float rotVecAcc     = mag.getRotVecAccuracyDeg();
+  float rotVecAvg     = mag.getRotVecHeadingAvg();
 
   // Build the ST line and send to serial only.
   // BLE phone connection is config terminal only — no continuous streaming
   // to avoid interference with pedal central role responsiveness.
-  char buf[160];
+  char buf[180];
   snprintf(buf, sizeof(buf),
-    "ST,%lu,%s,%s,%d,%.2f,%.1f,%.1f,%d,%.2f,%.1f,%d,%d,%.1f,%.1f",
+    "ST,%lu,%s,%s,%d,%.2f,%.1f,%.1f,%d,%.2f,%.1f,%d,%d,%.1f,%.1f,%.1f",
     (unsigned long)now_ms,
     modeStr,
     gpsHealthToStr(ghs),
@@ -295,7 +297,8 @@ static void printStatusLine(uint32_t now_ms) {
     (int)motorCmd,
     (int)geoMagSt,
     rotVecHead,
-    rotVecAcc
+    rotVecAcc,
+    rotVecAvg
   );
 
   Serial.println(buf);

@@ -1,0 +1,162 @@
+# config.h Integration Guide
+# Changes required in each existing file
+
+## Overview
+config.h introduces:
+- All #define defaults in one place
+- A Config struct with live runtime values
+- Two helper methods that build Params structs for HeadingLock and TargetLock
+
+The .ino declares one global:
+    Config cfg;
+
+Each subsystem is then initialised from cfg at boot. Classes themselves are 
+unchanged in structure — only the Params defaults inside them become unused 
+(the Params() default constructor can stay as a fallback, but cfg is the 
+source of truth at runtime).
+
+===========================================================================
+1. HeadingLock.h  — NO CHANGES REQUIRED
+===========================================================================
+The HeadingLock::Params default constructor stays as-is. In the .ino, 
+instead of constructing HeadingLock with default params, construct it from 
+cfg:
+
+    // OLD (.ino)
+    HeadingLock headingLock;                        // uses hardcoded defaults
+
+    // NEW (.ino)
+    HeadingLock headingLock(cfg.headingLockParams()); // uses cfg
+
+If you later call SET Kp from the CommandParser, do:
+    cfg.hlKp = newValue;
+    headingLock = HeadingLock(cfg.headingLockParams());   // rebuild with new params
+    // or add a setParams() method to HeadingLock (optional, cleaner)
+
+
+===========================================================================
+2. TargetLock.h  — NO CHANGES REQUIRED
+===========================================================================
+Same pattern as HeadingLock.
+
+    // OLD (.ino)
+    TargetLock targetLock;
+
+    // NEW (.ino)
+    TargetLock targetLock(cfg.targetLockParams());
+
+
+===========================================================================
+3. SController.h  — REMOVE the three constexpr values
+===========================================================================
+These move entirely to config.h / cfg:
+
+REMOVE from SController.h private section:
+    static constexpr uint32_t kLinkRecentMs     = 500;
+    static constexpr uint32_t kTimeoutMs        = 2000;
+    static constexpr uint32_t kAutoLockDelayMs  = 1000;
+
+ADD to SController constructor or a new init method:
+    void init(const Config& cfg) {
+        kTimeoutMs_     = cfg.ctrlTimeoutMs;
+        kLinkRecentMs_  = cfg.ctrlLinkRecentMs;
+        kAutoLockMs_    = cfg.ctrlAutoLockMs;
+        takeoverThr_    = cfg.ctrlTakeoverThr;
+    }
+
+Change the constexpr members to regular uint32_t members:
+    uint32_t kTimeoutMs_     = CFG_CTRL_TIMEOUT_MS;      // fallback default
+    uint32_t kLinkRecentMs_  = CFG_CTRL_LINK_RECENT_MS;
+    uint32_t kAutoLockMs_    = CFG_CTRL_AUTOLOCK_MS;
+    int      takeoverThr_    = CFG_CTRL_TAKEOVER_THR;
+
+Update the healthy() inline and tick100ms() references to use the member
+variables instead of the constexpr names.
+
+Also: the hardcoded `5` in onEvent() for takeover threshold:
+    // OLD
+    if (bleOk_ && (abs((int)v) > 5)) {
+    // NEW
+    if (bleOk_ && (abs((int)v) > takeoverThr_)) {
+
+
+===========================================================================
+4. MotorController  — NO CHANGES TO .h/.cpp REQUIRED
+===========================================================================
+MotorController already exposes setters for its tunables. In the .ino, 
+call them from cfg after begin():
+
+    motor.setAngleLimits(cfg.angleLimitDeg, cfg.angleHystDeg);
+    motor.setMinPwm(cfg.minPwm);
+    motor.setOvercurrentTrip(cfg.overcurrentMa);
+
+countsPerRev is a constructor argument — in the .ino:
+    // OLD
+    MotorController motor(pins, 16940.0f);
+    // NEW
+    MotorController motor(pins, cfg.countsPerRev);
+    // Note: cfg must be declared BEFORE motor for this to work
+
+
+===========================================================================
+5. Magnetometer  — NO CHANGES TO .h/.cpp REQUIRED
+===========================================================================
+mag_offset and drift alpha are already settable via setOffset().
+In the .ino after begin():
+
+    mag.setOffset(cfg.magOffsetDeg);
+
+The drift alpha 0.002f in Magnetometer.cpp is hardcoded inline. 
+Two options:
+  A) Leave it — it rarely needs changing, cfg.magDriftAlpha documents 
+     the intent but doesn't wire in yet (acceptable for now)
+  B) Add setDriftAlpha(float) to Magnetometer — easy one-liner addition 
+     when you want the wire-up
+
+Recommendation: do option A for now, add the setter when CommandParser 
+needs it.
+
+
+===========================================================================
+6. BLEManager  — NO CHANGES REQUIRED
+===========================================================================
+Already uses setTargetNamePrefix() / setDeviceName() etc.
+In the .ino init:
+
+    // These were hardcoded strings — now come from config.h defines
+    ble.setTargetNamePrefix(BLE_TARGET_PREFIX);
+    ble.setDeviceName(BLE_DEVICE_NAME);
+    ble.setRssiFilter(CFG_BLE_RSSI_FILTER);
+    ble.setTxPower(CFG_BLE_TX_POWER);
+    ble.setActiveScan(CFG_BLE_ACTIVE_SCAN);
+
+
+===========================================================================
+7. .ino  — Declaration order matters
+===========================================================================
+Declare cfg first so all subsequent constructors can reference it:
+
+    #include "config.h"
+    // ... other includes ...
+
+    Config cfg;                                     // ← must be before motor
+
+    MotorController::Pins pins = { ... };           // pin assignments unchanged
+    MotorController motor(pins, cfg.countsPerRev);  // ← uses cfg
+    Magnetometer    mag(cfg.magOffsetDeg);           // ← uses cfg
+    HeadingLock     headingLock(cfg.headingLockParams());
+    TargetLock      targetLock(cfg.targetLockParams());
+    Controller      controller;
+    // controller.init(cfg) called in setup()
+
+
+===========================================================================
+SUMMARY — files that need editing
+===========================================================================
+File                Change needed
+-----------         -------------------------------------------------------
+config.h            NEW FILE (delivered)
+.ino                Add #include "config.h", declare cfg first, pass to subsystems
+SController.h/.cpp  Replace 3 constexpr with member vars, add init(cfg), fix takeover threshold
+Magnetometer.cpp    Optional: expose setDriftAlpha() — defer for now
+All others          NO CHANGES — use setters or constructor args from .ino

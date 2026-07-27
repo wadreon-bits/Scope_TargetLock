@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/wesa/.claude/projects/c--Users-wesa-OneDrive---teamsmt-com-Documents-Arduino-Scope-Target-BLE-Rotator-V13/memory/**)"
+    ]
+  }
+}

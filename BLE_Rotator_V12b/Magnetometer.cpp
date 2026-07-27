@@ -9,7 +9,7 @@
 // and is rejected — the previous heading is kept instead.
 // Consecutive bad samples (genuine fast rotation) are accepted on the second
 // occurrence to avoid locking up during real fast movement.
-static constexpr float SPIKE_FILTER_DEG = 15.0f;
+static constexpr float SPIKE_FILTER_DEG = 30.0f;  // was 15.0 at 100Hz, doubled for 50Hz
 
 Magnetometer::Magnetometer(float offsetDeg)
 : mag_offset(offsetDeg), headingDeg(0.0f), headingInit(false),
@@ -39,8 +39,8 @@ bool Magnetometer::begin() {
     if (!bno.begin_I2C()) return false;
 
 #ifdef USE_GAME_PRIMARY
-    bno.enableReport(SH2_GAME_ROTATION_VECTOR,        10000);  // 100 Hz — primary control
-    bno.enableReport(SH2_GEOMAGNETIC_ROTATION_VECTOR, 50000);  // 20 Hz — slow drift correction
+    bno.enableReport(SH2_GAME_ROTATION_VECTOR,        20000);  // 50 Hz — primary control (was 100 Hz)
+    // bno.enableReport(SH2_GEOMAGNETIC_ROTATION_VECTOR, 50000);  // disabled for testing — was 20 Hz
 #endif
 
 #ifdef USE_MAG_PRIMARY
@@ -51,7 +51,7 @@ bool Magnetometer::begin() {
     // Most accurate absolute heading the BNO085 produces.
     // Enabled at 10 Hz — we only need it for compass observation and arm-time reference,
     // not for the fast control loop.  Low rate keeps I2C load minimal.
-    bno.enableReport(SH2_ROTATION_VECTOR, 100000);  // 10 Hz
+    bno.enableReport(SH2_ROTATION_VECTOR, 25000);   // 40 Hz (was 10 Hz)
 
     headingInit    = false;
     spikeRejected_ = false;
@@ -137,14 +137,37 @@ void Magnetometer::update() {
         // Accuracy estimate is in radians; convert to degrees for easy reading.
         // This runs regardless of USE_GAME_PRIMARY / USE_MAG_PRIMARY mode.
         if (sensorValue.sensorId == SH2_ROTATION_VECTOR) {
-            rotVecHeadingDeg_  = quatToYawDeg(
+            rotVecHeadingDeg_  = wrap360(360.0f - quatToYawDeg(
                 sensorValue.un.rotationVector.real,
                 sensorValue.un.rotationVector.i,
                 sensorValue.un.rotationVector.j,
                 sensorValue.un.rotationVector.k
-            );
+            ));
             // accuracyDeg < 10.0 is the target for a trustworthy North reference
             rotVecAccuracyDeg_ = sensorValue.un.rotationVector.accuracy * 57.2957795f;
+
+            // Running circular mean — only accept samples with accuracy <= 10 deg
+            if (rotVecAccuracyDeg_ <= 10.0f) {
+                float rad = rotVecHeadingDeg_ * (M_PI / 180.0f);
+                float s   = sinf(rad);
+                float c   = cosf(rad);
+
+                // Subtract oldest slot from running sums
+                rvSinSum_ -= rvSinBuf_[rvAvgIdx_];
+                rvCosSum_ -= rvCosBuf_[rvAvgIdx_];
+
+                // Store new sample and add to sums
+                rvSinBuf_[rvAvgIdx_] = s;
+                rvCosBuf_[rvAvgIdx_] = c;
+                rvSinSum_ += s;
+                rvCosSum_ += c;
+
+                rvAvgIdx_ = (rvAvgIdx_ + 1) % RV_AVG_N;
+                if (rvAvgFill_ < RV_AVG_N) rvAvgFill_++;
+
+                rotVecHeadingAvg_ = wrap360(atan2f(rvSinSum_, rvCosSum_) * (180.0f / M_PI));
+            }
+            // If accuracy > 10, keep last good average — don't update
         }
     }
 }
