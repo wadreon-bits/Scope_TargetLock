@@ -26,7 +26,11 @@ public:
     kLinkRecentMs_ = cfg.ctrlLinkRecentMs;
     kAutoLockMs_   = cfg.ctrlAutoLockMs;
     takeoverThr_   = cfg.ctrlTakeoverThr;
+    maxMode_       = cfg.maxMode;
   }
+
+  // Live update — called by SET MAX_MODE without a full re-init
+  void setMaxMode(uint8_t m) { maxMode_ = (m <= 2) ? m : 2; }
 
   // Emit events from your callbacks / parser:
   void onEvent(Event e, float v = 0.0f, uint32_t t_ms = 0);
@@ -49,6 +53,7 @@ private:
   uint32_t kTimeoutMs_     = CFG_CTRL_TIMEOUT_MS;
   uint32_t kAutoLockMs_    = CFG_CTRL_AUTOLOCK_MS;
   int      takeoverThr_    = CFG_CTRL_TAKEOVER_THR;
+  uint8_t  maxMode_        = CFG_MAX_MODE;
 
   // --- State we own now ---
   Mode     mode_             = Mode::MANUAL;

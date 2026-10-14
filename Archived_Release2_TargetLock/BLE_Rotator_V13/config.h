@@ -120,6 +120,16 @@
 
 
 // ---------------------------------------------------------------------------
+// Mode ceiling  —  highest mode the system will auto-arm into
+// ---------------------------------------------------------------------------
+// 0 = MANUAL  — no locking, rotator stays manual
+// 1 = HL      — heading lock only, GPS target lock disabled
+// 2 = TL      — full target lock with HL fallback (default)
+// Change via: SET MAX_MODE TL | HL | MANUAL  (or 2 | 1 | 0)
+// Resets to this default on reboot.
+#define CFG_MAX_MODE            2
+
+// ---------------------------------------------------------------------------
 // Controller timing
 // ---------------------------------------------------------------------------
 // Time without a pedal packet before motor output is inhibited (ms).
@@ -186,4 +196,5 @@ struct Config {
     uint32_t    ctrlLinkRecentMs    = CFG_CTRL_LINK_RECENT_MS;
     uint32_t    ctrlAutoLockMs      = CFG_CTRL_AUTOLOCK_MS;
     int         ctrlTakeoverThr     = CFG_CTRL_TAKEOVER_THR;
+    uint8_t     maxMode             = CFG_MAX_MODE;
 };

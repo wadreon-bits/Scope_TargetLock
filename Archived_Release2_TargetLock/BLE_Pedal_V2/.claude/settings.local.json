@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:wiki.seeedstudio.com)",
+      "Read(//c/Users/wesa/AppData/Local/Arduino15/packages/Seeeduino/hardware/nrf52/1.0.0/variants/Seeed_XIAO_nRF52840/**)"
+    ]
+  }
+}

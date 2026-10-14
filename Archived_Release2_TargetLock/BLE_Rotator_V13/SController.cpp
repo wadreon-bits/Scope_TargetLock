@@ -92,15 +92,14 @@ void Controller::tick100ms(uint32_t now,
   }
 
   // --- Auto-arm ---
-  if (mode_ == Mode::MANUAL && autoLockEnabled_ && ok && magReady) {
+  if (mode_ == Mode::MANUAL && autoLockEnabled_ && ok && magReady && maxMode_ > 0) {
     if ((int32_t)(now - lastRealPedalTime_) >= (int32_t)kAutoLockMs_) {
       // Pass now so armAtCurrent timestamps are consistent with the tick
-      if (targetLock.armAtCurrent(now, gps, mag, motor, headingLock)) {
+      if (maxMode_ == 2 && targetLock.armAtCurrent(now, gps, mag, motor, headingLock)) {
         mode_ = Mode::TARGET_LOCK;
-      } else {
-        // TL failed (no GPS, or RotVecAvg not ready).
-        // Try to establish compass reference for HL — armCompassRef() is a no-op
-        // if RotVecAvg is not yet valid, in which case HL arms in game-frame fallback.
+      } else if (maxMode_ >= 1) {
+        // TL not attempted or failed — arm HL.
+        // armCompassRef() is a no-op if RotVecAvg not yet valid; HL falls back to game-frame.
         mag.armCompassRef();
         if (headingLock.armAtCurrent(mag, motor)) {
           mode_ = Mode::HEADING_LOCK;

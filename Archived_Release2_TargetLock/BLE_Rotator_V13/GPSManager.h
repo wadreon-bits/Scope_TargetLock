@@ -54,9 +54,10 @@ public:
     const GPSEpoch& getData() const { return lastGood_; }
 
 private:
-    bool gpsPresent();   // used only during begin() boot probe
-    int  i2cReadN(uint8_t* dst, size_t n);
-    int  readOneUBX(uint8_t &cls, uint8_t &id, uint16_t &len, uint8_t* payload);
+    bool     gpsPresent();    // used only during begin() boot probe
+    uint16_t bytesAvailable(); // reads u-blox DDC stream-length registers 0xFD/0xFE
+    int      i2cReadN(uint8_t* dst, size_t n);
+    int      readOneUBX(uint8_t &cls, uint8_t &id, uint16_t &len, uint8_t* payload);
     void parseNAV_PVT(const uint8_t* p, uint16_t len);
     void parseNAV_VELNED(const uint8_t* p, uint16_t len);
     void evaluateHealth();

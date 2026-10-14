@@ -9,5 +9,5 @@ HW = Onshape [Collar_24M_V3] and [Assembly_24V3]		24mm design with encoder. Basi
 NOTES:  There was not formal placement of the BNO085 sensor. Just taped on for now. This version was for testing only. 
 	HW not finished to provide place for sensor. 
 
-PACKAGE_RELEASE2_TARGETLOCK	= XXXXXX + XXXXXX
+PACKAGE_RELEASE2_TARGETLOCK	= BLE_Rotator_V13 + BLE_Pedal_V2
 HW = Onshape [Collar_24M_V4] and [Assembly_TargetHead]		24mm design with encoder. 

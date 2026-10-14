@@ -59,6 +59,29 @@ bool GPSManager::gpsPresent()
 }
 
 // =============================================================================
+// bytesAvailable()
+// Reads the u-blox DDC stream-length registers (0xFD = MSB, 0xFE = LSB).
+// Returns the number of bytes waiting in the GPS output buffer.
+// Returns 0 on I2C error or if the module returns 0xFFFF (not ready).
+// Called in update() before readOneUBX — when the buffer is empty the 128-
+// iteration sync-byte search is skipped entirely, keeping the shared I2C bus
+// free for BNO085 reads.
+// =============================================================================
+uint16_t GPSManager::bytesAvailable()
+{
+    wire_->beginTransmission(GPS_I2C_ADDR);
+    wire_->write(0xFD);                           // register: bytes available MSB
+    if (wire_->endTransmission(false) != 0) return 0;
+
+    if (wire_->requestFrom((int)GPS_I2C_ADDR, 2) != 2) return 0;
+    uint8_t msb = wire_->read();
+    uint8_t lsb = wire_->read();
+
+    if (msb == 0xFF && lsb == 0xFF) return 0;    // 0xFFFF = module not ready
+    return (uint16_t)((uint16_t)msb << 8 | lsb);
+}
+
+// =============================================================================
 // i2cReadN()
 // Reads n bytes from GPS over I2C in 32-byte chunks.
 // Uses millis() timeout (GPS_TIMEOUT_MS = 50 ms) — no infinite spin.
@@ -181,26 +204,32 @@ void GPSManager::update()
     if (now - lastRead_ >= 100) {
         lastRead_ = now;
 
-        uint8_t cls, id;
-        uint16_t len;
-        uint8_t payload[GPS_MAX_UBX];
+        // Only attempt a read when the GPS output buffer has bytes waiting.
+        // Skipping when bytesAvailable() == 0 avoids the 128-iteration sync-byte
+        // search that would otherwise block the shared I2C bus and starve
+        // BNO085 reads when GPS is acquiring or outputting no data.
+        if (bytesAvailable() > 0) {
+            uint8_t cls, id;
+            uint16_t len;
+            uint8_t payload[GPS_MAX_UBX];
 
-        int got = readOneUBX(cls, id, len, payload);
+            int got = readOneUBX(cls, id, len, payload);
 
-        if (got > 0 && cls == UBX_NAV) {
-            if (id == ID_PVT) {
-                parseNAV_PVT(payload, len);
-                lastFresh_ = now;
-            } else if (id == ID_VELNED) {
-                parseNAV_VELNED(payload, len);
-            }
-        } else {
-            // No valid frame — drain any stale bytes to keep bus clean
-            int cleared = 0;
-            while (cleared < 64) {
-                int n = wire_->requestFrom((int)GPS_I2C_ADDR, 16);
-                if (n <= 0) break;
-                while (wire_->available()) { (void)wire_->read(); cleared++; }
+            if (got > 0 && cls == UBX_NAV) {
+                if (id == ID_PVT) {
+                    parseNAV_PVT(payload, len);
+                    lastFresh_ = now;
+                } else if (id == ID_VELNED) {
+                    parseNAV_VELNED(payload, len);
+                }
+            } else {
+                // Bytes were present but frame was malformed — drain stale data
+                int cleared = 0;
+                while (cleared < 64) {
+                    int n = wire_->requestFrom((int)GPS_I2C_ADDR, 16);
+                    if (n <= 0) break;
+                    while (wire_->available()) { (void)wire_->read(); cleared++; }
+                }
             }
         }
     }

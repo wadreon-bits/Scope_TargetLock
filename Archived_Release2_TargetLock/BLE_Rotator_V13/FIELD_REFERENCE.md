@@ -1,4 +1,4 @@
-# Scope Rotator V13 — Field Reference Card
+# Scope Rotator V13.1 — Field Reference Card
 **BLE_Rotator_V13**  |  Serial: 115,200 baud  |  BLE: Nordic UART (nRF Toolbox / LightBlue)
 
 ---
@@ -7,9 +7,7 @@
 
 | Command | Description |
 |---------|-------------|
-| `L` | **Enable lock** — arms Target Lock if GPS valid, else Heading Lock |
-| `l` | **Disable lock** — manual only until `L` is sent again |
-| `A` | Overcurrent trip **+25 mA** |
+| `A` | Overcurrent trip **+25 oumA** |
 | `a` | Overcurrent trip **−25 mA** |
 | `Z` or `z` | Reset encoder to 0 |
 | `?` / `H` / `h` | Print help |
@@ -54,8 +52,9 @@ SET <param> <val>  — update live (float or int as appropriate)
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `AUTOLOCK_MS` | `2000` | Idle time (ms) after last pedal input before auto-arm re-engages |
-| `TAKEOVER_THR` | `5` | Pedal command magnitude that triggers manual takeover from lock mode |
+| `MAX_MODE` | `TL` | Highest mode the system will use: `TL` (full target lock), `HL` (heading lock only), `MANUAL` (no targeting). Also accepts `2`/`1`/`0`. Session only — reboot restores config.h default |
+| `AUTOLOCK_MS` | `2000` | Idle time (ms) after last pedal input before targeting mode arms |
+| `TAKEOVER_THR` | `5` | Pedal command magnitude that triggers manual takeover from a targeting mode |
 
 ### Motor / Sensor
 

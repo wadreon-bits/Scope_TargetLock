@@ -87,7 +87,17 @@ bool TargetLock::armAtCurrent(uint32_t now_ms,
   if (!e.valid)             return false;
   if (e.hAcc > p_.maxHAcc_m) return false;
 
-  // Rotator heading must be valid — convention: negative means not ready
+  // Establish compass reference before computing rotator heading.
+  // armCompassRef() must succeed first so that getRotatorHeading() returns
+  // true-North compass degrees when projecting the target point.
+  // If called before compassArmed_ is set, getRotatorHeading() falls back to
+  // game-frame (boot-relative), projecting the target at the wrong geographic
+  // direction and causing a large initial heading error after arm.
+  // If RotVecAvg is not yet valid, armCompassRef() returns false and TL refuses
+  // to arm — controller falls through to headingLock.armAtCurrent() (HL only).
+  if (!mag.armCompassRef()) return false;
+
+  // Rotator heading — compass frame is now established; always returns compass degrees.
   float rotHead = mag.getRotatorHeading(motor.getAngleDegCumulative());
   if (rotHead < 0.0f) return false;
 
@@ -112,14 +122,6 @@ bool TargetLock::armAtCurrent(uint32_t now_ms,
   distToTarget_m_    = p_.distance_m;   // at arm time, boat is exactly distance_m away
   boatDelta_m_       = 0.0f;
   lastFilteredDelta_ = 0.0f;
-
-  // Arm HeadingLock to the true-North GPS bearing.
-  // armCompassRef() anchors the game vector to compass North at this moment —
-  // getRotatorHeading() (and all HL measurements) will now return compass degrees,
-  // so the bearing can be fed directly with no frame translation.
-  // If RotVecAvg is not yet valid, armCompassRef() returns false and TL refuses
-  // to arm — controller falls through to headingLock.armAtCurrent() (HL only).
-  if (!mag.armCompassRef()) return false;
 
   headingLock.setTarget(bearing);
 

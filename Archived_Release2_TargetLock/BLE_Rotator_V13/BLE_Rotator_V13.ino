@@ -110,6 +110,30 @@
 //           BNO085 report rates tuned: Game RV 100->50 Hz, RotVec 10->40 Hz,
 //             GeoMag disabled — reduces I2C load, improves RotVec settling time.
 //           Spike filter threshold doubled 15->30 deg to match 50 Hz sample rate.
+//V13.1 Bug fixes + MAX_MODE command:
+//           Added SET/GET MAX_MODE — configures the highest targeting mode the system
+//             will use: TL (2, default), HL (1), or MANUAL (0, no targeting).
+//             Accepts token (TL/HL/MANUAL) or numeric (2/1/0). Session-only; reboot
+//             resets to CFG_MAX_MODE in config.h.
+//           Removed L/l single-char commands — redundant with SET MAX_MODE.
+//V13.1 Bug fixes only — no behavior changes:
+//           Bug A (TargetLock.cpp armAtCurrent): armCompassRef() moved before
+//             getRotatorHeading(). Previously rotHead was computed in game-frame
+//             fallback when compassArmed_ was false (TL arming before HL had ever
+//             armed), projecting the GPS target at the wrong geographic direction.
+//             After armCompassRef set the compass anchor the tracking frame changed
+//             but the target bearing was derived from the wrong projection — rotator
+//             drove to an incorrect heading on first TL arm when GPS and RotVecAvg
+//             became available simultaneously.
+//             Fix: armCompassRef() first; rotHead always computed in compass frame.
+//           Bug B (GPSManager.cpp update): bytesAvailable() helper added — reads
+//             u-blox DDC stream-length registers 0xFD/0xFE before calling readOneUBX.
+//             Previously the 128-iteration sync-byte search ran whenever GPS had no
+//             valid frame, blocking the shared I2C bus for up to ~1 s worst case and
+//             starving BNO085 reads — caused occasional full freezes and progressive
+//             blocky HL correction during extended GPS-acquiring periods indoors.
+//             Fix: skip read entirely when GPS buffer reports 0 bytes available;
+//             sync search and drain loop now only run when data is confirmed present.
 
 
 #include <bluefruit.h>
@@ -627,6 +651,13 @@ static void cmdPrintln(const String& s) {
   cmdPrintln(s.c_str());
 }
 
+// ---- MAX_MODE helpers ----------------------------------------------------
+static const char* maxModeStr(uint8_t m) {
+  if (m == 0) return "MANUAL";
+  if (m == 1) return "HL";
+  return "TL";
+}
+
 // ---- GET handler ---------------------------------------------------------
 // Prints one or all tunable cfg parameters.
 // Called from dispatchLine() when verb == "GET".
@@ -669,6 +700,10 @@ static void handleGet(const String& token) {
   if (all || token == "TAKEOVER_THR")pi("TAKEOVER_THR", cfg.ctrlTakeoverThr);
   if (all || token == "OVERCURRENT") pi("OVERCURRENT",  (int)cfg.overcurrentMa);
   if (all || token == "MAG_OFFSET")  pf("MAG_OFFSET",   cfg.magOffsetDeg,       2);
+  if (all || token == "MAX_MODE") {
+    char out[48]; snprintf(out, sizeof(out), "  %-14s %s (%u)", "MAX_MODE", maxModeStr(cfg.maxMode), cfg.maxMode);
+    Serial.println(out); bleConfig.sendLine(out);
+  }
 
   // If a specific token was requested but matched nothing, say so
   if (!all) {
@@ -681,7 +716,8 @@ static void handleGet(const String& token) {
       token == "TL_DRIFT"    || token == "TL_ALPHA"    ||
       token == "TL_MAXDIST"  || token == "TL_GPSLOST"  ||
       token == "AUTOLOCK_MS" || token == "TAKEOVER_THR"||
-      token == "OVERCURRENT" || token == "MAG_OFFSET";
+      token == "OVERCURRENT" || token == "MAG_OFFSET"  ||
+      token == "MAX_MODE";
     if (!known) {
       String msg = F("Unknown param: "); msg += token;
       cmdPrintln(msg);
@@ -778,6 +814,20 @@ static void handleSet(const String& token, const String& valStr) {
     cfg.magOffsetDeg = fval;
     mag.setOffset(cfg.magOffsetDeg);
 
+  // Mode ceiling — applied immediately to controller
+  } else if (token == "MAX_MODE") {
+    String v = valStr; v.toUpperCase(); v.trim();
+    uint8_t m;
+    if      (v == "MANUAL" || v == "0") m = 0;
+    else if (v == "HL"     || v == "1") m = 1;
+    else if (v == "TL"     || v == "2") m = 2;
+    else {
+      cmdPrintln("MAX_MODE: use MANUAL, HL, or TL  (or 0, 1, 2)");
+      return;
+    }
+    cfg.maxMode = m;
+    controller.setMaxMode(m);
+
   } else {
     applied = false;
     String msg = F("Unknown param: "); msg += token;
@@ -799,14 +849,13 @@ static void printHelp() {
     "--- Commands ---",
     "  A / a            overcurrent +/- 25 mA",
     "  Z / z            reset encoder",
-    "  L                enable lock mode + arm now (auto-arm active)",
-    "  l                disable lock mode permanently (manual only until L)",
     "  VER              firmware version",
     "  INFO             system snapshot",
     "  STATUS ON/OFF    enable/suppress 4 Hz status stream",
     "  GET ALL          show all tunable parameters",
     "  GET <param>      show one parameter",
     "  SET <param> <v>  update live parameter (resets on reboot)",
+    "  SET MAX_MODE     TL | HL | MANUAL  (or 2|1|0) — mode ceiling",
     "  ? / H / h        this help"
   };
   for (const char* l : lines) { cmdPrintln(l); }
@@ -883,36 +932,6 @@ void dispatchLine(String& line) {
       case 'Z': case 'z':
         motor.resetEncoder();
         cmdPrintln("Encoder reset to 0");
-        return;
-
-      case 'L': {
-        // Enable auto-lock and attempt immediate arm.
-        // From this point auto-arm will re-engage on pedal idle as normal.
-        controller.onEvent(Controller::Event::AUTOLOCK_ON);
-        uint32_t now_ms = millis();
-        if (targetLock.armAtCurrent(now_ms, gps, mag, motor, headingLock)) {
-          controller.onEvent(Controller::Event::HL_SET_TARGET, headingLock.target(), now_ms);
-          cmdPrintln("Lock: ON — TARGET LOCK armed");
-        } else {
-          // TL failed — attempt compass reference before HL arm (mirrors SController path)
-          mag.armCompassRef();
-          if (headingLock.armAtCurrent(mag, motor)) {
-            controller.onEvent(Controller::Event::HL_SET_TARGET, headingLock.target(), now_ms);
-            char buf[48]; snprintf(buf, sizeof(buf), "Lock: ON — HL armed -> %.1f deg", headingLock.target());
-            cmdPrintln(buf);
-          } else {
-            cmdPrintln("Lock: ON — no fix yet, will auto-arm when ready");
-          }
-        }
-      } return;
-
-      case 'l':
-        // Permanently disable all locking until 'L' is sent again.
-        // Disables auto-arm so rotation corrections do not resume on their own.
-        controller.onEvent(Controller::Event::AUTOLOCK_OFF);
-        controller.onEvent(Controller::Event::HL_OFF);
-        targetLock.drop();
-        cmdPrintln("Lock: OFF — manual only until L sent");
         return;
 
       case '?': case 'H': case 'h':
